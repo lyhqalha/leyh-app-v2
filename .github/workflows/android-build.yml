@@ -1,107 +1,171 @@
 name: Build Leyh Qalha v38 APK
 
-'on': push: branches: - main workflow_dispatch:
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
-permissions: contents: read
+permissions:
+  contents: read
 
-jobs: build: runs-on: ubuntu-latest timeout-minutes: 60
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
 
-steps:
-  - name: Checkout repository
-    uses: actions/checkout@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  - name: Extract v38 project
-    shell: bash
-    run: |
-      set -euo pipefail
-      ARCHIVE="leyh-v38-android-build-prepared.zip"
+      - name: Extract v38 project
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      if [ ! -f "$ARCHIVE" ]; then
-        echo "::error::Project ZIP not found: $ARCHIVE"
-        find . -maxdepth 3 -type f -name '*.zip'
-        exit 1
-      fi
+          ARCHIVE="leyh-v38-android-build-prepared.zip"
 
-      mkdir -p /tmp/leyh-source
-      unzip -q "$ARCHIVE" -d /tmp/leyh-source
+          if [ ! -f "$ARCHIVE" ]; then
+            echo "::error::Project ZIP not found: $ARCHIVE"
+            find . -maxdepth 4 -type f -name '*.zip'
+            exit 1
+          fi
 
-      PROJECT="$(find /tmp/leyh-source -type f -name package.json -printf '%h\n' | head -n 1)"
+          mkdir -p /tmp/leyh-source
+          unzip -q "$ARCHIVE" -d /tmp/leyh-source
 
-      if [ -z "$PROJECT" ]; then
-        echo "::error::package.json not found in the ZIP."
-        exit 1
-      fi
+          PROJECT="$(find /tmp/leyh-source -type f -name package.json -print -quit | xargs -r dirname)"
 
-      echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
-      echo "Project directory: $PROJECT"
+          if [ -z "$PROJECT" ]; then
+            echo "::error::package.json not found in the ZIP."
+            exit 1
+          fi
 
-  - name: Set up Node.js
-    uses: actions/setup-node@v4
-    with:
-      node-version: '22'
+          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+          echo "Project directory: $PROJECT"
 
-  - name: Set up Java
-    uses: actions/setup-java@v4
-    with:
-      distribution: temurin
-      java-version: '17'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: /tmp/leyh-source/package-lock.json
 
-  - name: Set up Android SDK
-    uses: android-actions/setup-android@v3
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
-  - name: Install dependencies
-    run: npm install --no-audit --no-fund
-    working-directory: ${{ env.PROJECT_DIR }}
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-  - name: Build web application
-    run: npm run build
-    working-directory: ${{ env.PROJECT_DIR }}
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-  - name: Check Android preparation script
-    shell: bash
-    run: |
-      set -euo pipefail
-      test -f scripts/prepare_android.sh || {
-        echo "::error::scripts/prepare_android.sh is missing."
-        exit 1
-      }
-    working-directory: ${{ env.PROJECT_DIR }}
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
 
-  - name: Check Capacitor configuration
-    shell: bash
-    run: |
-      set -euo pipefail
-      if [ ! -f capacitor.config.ts ] && \
-         [ ! -f capacitor.config.json ] && \
-         [ ! -f capacitor.config.js ]; then
-        echo "::error::Capacitor configuration is missing from the project ZIP."
-        exit 1
-      fi
-    working-directory: ${{ env.PROJECT_DIR }}
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+        working-directory: ${{ env.PROJECT_DIR }}
 
-  - name: Add Android platform
-    run: npx cap add android
-    working-directory: ${{ env.PROJECT_DIR }}
+      - name: Check project scripts
+        shell: bash
+        run: |
+          set -euo pipefail
 
-  - name: Sync Android platform
-    run: npx cap sync android
-    working-directory: ${{ env.PROJECT_DIR }}
+          node -e "const p=require('./package.json'); console.log(JSON.stringify(p.scripts || {}, null, 2));"
 
-  - name: Prepare Android resources and offline TTS
-    run: bash scripts/prepare_android.sh
-    working-directory: ${{ env.PROJECT_DIR }}
+          if [ ! -f scripts/prepare_android.sh ]; then
+            echo "::error::scripts/prepare_android.sh is missing."
+            exit 1
+          fi
+        working-directory: ${{ env.PROJECT_DIR }}
 
-  - name: Build APK
-    run: |
-      set -euo pipefail
-      chmod +x gradlew
-      ./gradlew assembleDebug --stacktrace
-    working-directory: ${{ env.PROJECT_DIR }}/android
+      - name: Check Capacitor configuration
+        shell: bash
+        run: |
+          set -euo pipefail
 
-  - name: Upload APK
-    uses: actions/upload-artifact@v4
-    with:
-      name: leyh-qalha-v38-debug-apk
-      path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
-      if-no-files-found: error
-      retention-days: 14
+          if [ ! -f capacitor.config.ts ] && \
+             [ ! -f capacitor.config.json ] && \
+             [ ! -f capacitor.config.js ]; then
+            echo "::error::Capacitor configuration is missing."
+            exit 1
+          fi
+
+          node -e "const p=require('./package.json'); if (!(p.dependencies?.['@capacitor/core'] || p.devDependencies?.['@capacitor/core'])) { console.error('Capacitor core is missing from package.json'); process.exit(1); }"
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Build web application
+        run: npm run build
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Add Android platform if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -d android ]; then
+            npx cap add android
+          else
+            echo "Android platform already exists."
+          fi
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Sync Android platform
+        run: npx cap sync android
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Prepare Android resources and offline TTS
+        run: bash scripts/prepare_android.sh
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Verify Android Gradle wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f gradlew ]; then
+            echo "::error::Gradle wrapper was not found in the Android directory."
+            exit 1
+          fi
+
+          chmod +x gradlew
+        working-directory: ${{ env.PROJECT_DIR }}/android
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        working-directory: ${{ env.PROJECT_DIR }}/android
+
+      - name: Verify generated APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "::error::APK was not generated at the expected path."
+            find app/build/outputs -type f -name '*.apk' 2>/dev/null || true
+            exit 1
+          fi
+
+          ls -lh "$APK"
+          sha256sum "$APK"
+        working-directory: ${{ env.PROJECT_DIR }}/android
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: leyh-qalha-v38-debug-apk
+          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
