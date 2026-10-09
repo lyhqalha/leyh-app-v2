@@ -38,13 +38,14 @@ jobs:
           PACKAGE_FILE="$(find /tmp/leyh-source -type f -name package.json -print -quit)"
 
           if [ -z "$PACKAGE_FILE" ]; then
-            echo "::error::package.json was not found in the ZIP."
+            echo "::error::package.json was not found."
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
           echo "Project directory: $PROJECT_DIR"
 
       - name: Set up Node.js
@@ -56,34 +57,43 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Configure Android SDK
+      - name: Locate Android SDK
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
 
-          SDKMANAGER="${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager"
-
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -type f -name sdkmanager -print -quit)"
-          fi
-
-          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
-            echo "::error::Android SDK sdkmanager was not found."
+          if [ ! -d "$SDK" ]; then
+            echo "::error::Android SDK directory not found: $SDK"
             exit 1
           fi
 
-          echo "Using sdkmanager: $SDKMANAGER"
-          "$SDKMANAGER" --version
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
 
-          "$SDKMANAGER" --licenses </dev/null || true
+          echo "Android SDK: $SDK"
+          ls -la "$SDK"
+
+          SDKMANAGER="$(find "$SDK/cmdline-tools" \
+            -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager was not found in the installed Android SDK."
+            exit 1
+          fi
+
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+          echo "Using sdkmanager: $SDKMANAGER"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          yes | "$SDKMANAGER" --licenses || true
 
           "$SDKMANAGER" \
             "platform-tools" \
@@ -101,19 +111,19 @@ jobs:
             exit 1
           }
 
+          test -f capacitor.config.ts || {
+            echo "::error::capacitor.config.ts is missing."
+            exit 1
+          }
+
           test -f scripts/prepare_android.sh || {
             echo "::error::scripts/prepare_android.sh is missing."
             exit 1
           }
 
-          if [ ! -f capacitor.config.ts ] && \
-             [ ! -f capacitor.config.json ] && \
-             [ ! -f capacitor.config.js ]; then
-            echo "::error::Capacitor configuration is missing."
-            exit 1
-          fi
+          echo "Project files verified."
 
-      - name: Install dependencies
+      - name: Install JavaScript dependencies
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
@@ -125,40 +135,11 @@ jobs:
             npm install --no-audit --no-fund
           fi
 
-      - name: Verify Capacitor dependencies
-        shell: bash
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          set -euo pipefail
-
-          node <<'NODE'
-          const p = require('./package.json');
-          const deps = {
-            ...p.dependencies,
-            ...p.devDependencies
-          };
-
-          const required = [
-            '@capacitor/core',
-            '@capacitor/cli',
-            '@capacitor/android'
-          ];
-
-          const missing = required.filter(name => !deps[name]);
-
-          if (missing.length) {
-            console.error('Missing dependencies:', missing.join(', '));
-            process.exit(1);
-          }
-
-          console.log('Capacitor dependencies verified.');
-          NODE
-
       - name: Build web application
         working-directory: ${{ env.PROJECT_DIR }}
         run: npm run build
 
-      - name: Add Android platform if needed
+      - name: Add Android platform
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
@@ -170,14 +151,16 @@ jobs:
             echo "Android platform already exists."
           fi
 
-      - name: Sync Android platform
+      - name: Sync Capacitor
         working-directory: ${{ env.PROJECT_DIR }}
         run: npx cap sync android
 
       - name: Prepare Android resources and offline TTS
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
-        run: bash scripts/prepare_android.sh
+        run: |
+          set -euo pipefail
+          bash scripts/prepare_android.sh
 
       - name: Verify Gradle wrapper
         shell: bash
@@ -196,7 +179,10 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
           set -euo pipefail
-          ./gradlew assembleDebug --no-daemon --stacktrace
+
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --stacktrace
 
       - name: Verify APK
         shell: bash
@@ -212,6 +198,7 @@ jobs:
             exit 1
           fi
 
+          echo "APK generated successfully."
           ls -lh "$APK"
           sha256sum "$APK"
 
