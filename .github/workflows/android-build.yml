@@ -35,14 +35,14 @@ jobs:
           mkdir -p /tmp/leyh-source
           unzip -q "$ARCHIVE" -d /tmp/leyh-source
 
-          PROJECT="$(find /tmp/leyh-source -type f -name package.json -print -quit)"
+          PACKAGE_FILE="$(find /tmp/leyh-source -type f -name package.json -print -quit)"
 
-          if [ -z "$PROJECT" ]; then
+          if [ -z "$PACKAGE_FILE" ]; then
             echo "::error::package.json was not found in the ZIP."
             exit 1
           fi
 
-          PROJECT_DIR="$(dirname "$PROJECT")"
+          PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Project directory: $PROJECT_DIR"
@@ -61,27 +61,50 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK packages
+      - name: Configure Android SDK
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Check project files
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+
+          SDKMANAGER="${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          fi
+
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "::error::Android SDK sdkmanager was not found."
+            exit 1
+          fi
+
+          echo "Using sdkmanager: $SDKMANAGER"
+          "$SDKMANAGER" --version
+
+          "$SDKMANAGER" --licenses </dev/null || true
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Verify project files
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set -euo pipefail
 
-          if [ ! -f package.json ]; then
+          test -f package.json || {
             echo "::error::package.json is missing."
             exit 1
-          fi
+          }
 
-          if [ ! -f scripts/prepare_android.sh ]; then
+          test -f scripts/prepare_android.sh || {
             echo "::error::scripts/prepare_android.sh is missing."
             exit 1
-          fi
+          }
 
           if [ ! -f capacitor.config.ts ] && \
              [ ! -f capacitor.config.json ] && \
@@ -108,24 +131,28 @@ jobs:
         run: |
           set -euo pipefail
 
-          node -e "
-            const p = require('./package.json');
-            const deps = {
-              ...p.dependencies,
-              ...p.devDependencies
-            };
+          node <<'NODE'
+          const p = require('./package.json');
+          const deps = {
+            ...p.dependencies,
+            ...p.devDependencies
+          };
 
-            if (!deps['@capacitor/core'] ||
-                !deps['@capacitor/cli'] ||
-                !deps['@capacitor/android']) {
-              console.error(
-                'Required Capacitor dependencies are missing.'
-              );
-              process.exit(1);
-            }
+          const required = [
+            '@capacitor/core',
+            '@capacitor/cli',
+            '@capacitor/android'
+          ];
 
-            console.log('Capacitor dependencies verified.');
-          "
+          const missing = required.filter(name => !deps[name]);
+
+          if (missing.length) {
+            console.error('Missing dependencies:', missing.join(', '));
+            process.exit(1);
+          }
+
+          console.log('Capacitor dependencies verified.');
+          NODE
 
       - name: Build web application
         working-directory: ${{ env.PROJECT_DIR }}
@@ -150,9 +177,7 @@ jobs:
       - name: Prepare Android resources and offline TTS
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          set -euo pipefail
-          bash scripts/prepare_android.sh
+        run: bash scripts/prepare_android.sh
 
       - name: Verify Gradle wrapper
         shell: bash
@@ -173,7 +198,7 @@ jobs:
           set -euo pipefail
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Verify generated APK
+      - name: Verify APK
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
@@ -182,12 +207,11 @@ jobs:
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "::error::Expected APK was not generated."
+            echo "::error::APK was not generated."
             find app/build/outputs -type f -name '*.apk' || true
             exit 1
           fi
 
-          echo "APK generated successfully."
           ls -lh "$APK"
           sha256sum "$APK"
 
