@@ -1,114 +1,106 @@
 name: Build Leyh Qalha v38 APK
 
-'on':
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+'on': push: branches: - main workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: contents: read
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+jobs: build: runs-on: ubuntu-latest timeout-minutes: 60
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
 
-      - name: Extract v38 project
-        shell: bash
-        run: |
-          set -euo pipefail
-          ARCHIVE="leyh-v38-android-build-prepared.zip"
+  - name: Extract v38 project
+    shell: bash
+    run: |
+      set -euo pipefail
+      ARCHIVE="leyh-v38-android-build-prepared.zip"
 
-          if [ ! -f "$ARCHIVE" ]; then
-            echo "::error::Project ZIP not found: $ARCHIVE"
-            find . -maxdepth 2 -type f -name '*.zip'
-            exit 1
-          fi
+      if [ ! -f "$ARCHIVE" ]; then
+        echo "::error::Project ZIP not found: $ARCHIVE"
+        find . -maxdepth 2 -type f -name '*.zip'
+        exit 1
+      fi
 
-          mkdir -p /tmp/leyh-source
-          unzip -q "$ARCHIVE" -d /tmp/leyh-source
+      mkdir -p /tmp/leyh-source
+      unzip -q "$ARCHIVE" -d /tmp/leyh-source
 
-          PROJECT="$(find /tmp/leyh-source -name package.json -printf '%h\n' | head -n 1)"
+      PROJECT="$(find /tmp/leyh-source -name package.json -printf '%h\n' | head -n 1)"
 
-          if [ -z "$PROJECT" ]; then
-            echo "::error::package.json not found in the ZIP."
-            exit 1
-          fi
+      if [ -z "$PROJECT" ]; then
+        echo "::error::package.json not found in the ZIP."
+        exit 1
+      fi
 
-          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+      echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+  - name: Set up Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: '22'
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+  - name: Set up Java
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-cmdline-tools-version: 'latest' 
+  - name: Set up Android SDK
+    uses: android-actions/setup-android@v3
+    with:
+      cmdline-tools-version: 'latest'
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-        working-directory: ${{ env.PROJECT_DIR }}
+  - name: Install dependencies
+    run: npm install --no-audit --no-fund
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Build web application
-        run: npm run build
-        working-directory: ${{ env.PROJECT_DIR }}
+  - name: Build web application
+    run: npm run build
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Check Android preparation files
-        shell: bash
-        run: |
-          set -e
-          if [ ! -f scripts/prepare_android.sh ]; then
-            echo "::error::scripts/prepare_android.sh is missing."
-            exit 1
-          fi
-        working-directory: ${{ env.PROJECT_DIR }}
+  - name: Check Android preparation files
+    shell: bash
+    run: |
+      set -e
+      if [ ! -f scripts/prepare_android.sh ]; then
+        echo "::error::scripts/prepare_android.sh is missing."
+        exit 1
+      fi
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Check Capacitor configuration
-        shell: bash
-        run: |
-          if [ ! -f capacitor.config.ts ] && \
-             [ ! -f capacitor.config.json ] && \
-             [ ! -f capacitor.config.js ]; then
-            echo "::error::Capacitor configuration is missing."
-            exit 1
-          fi
-        working-directory: ${{ env.PROJECT_DIR }}
+  - name: Check Capacitor configuration
+    shell: bash
+    run: |
+      if [ ! -f capacitor.config.ts ] && \
+         [ ! -f capacitor.config.json ] && \
+         [ ! -f capacitor.config.js ]; then
+        echo "::error::Capacitor configuration is missing."
+        exit 1
+      fi
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Add Android platform
-        run: npx cap add android
-        working-directory: ${{ env.PROJECT_DIR }}
+  - name: Add Android platform
+    run: npx cap add android
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Sync Android platform
-        run: npx cap sync android
-        working-directory: ${{ env.PROJECT_DIR }}
+  - name: Sync Android platform
+    run: npx cap sync android
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Prepare Android resources and offline TTS
-        run: bash scripts/prepare_android.sh
-        working-directory: ${{ env.PROJECT_DIR }}
+  - name: Prepare Android resources and offline TTS
+    run: bash scripts/prepare_android.sh
+    working-directory: ${{ env.PROJECT_DIR }}
 
-      - name: Build APK
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
-        working-directory: ${{ env.PROJECT_DIR }}/android
+  - name: Build APK
+    run: |
+      chmod +x gradlew
+      ./gradlew assembleDebug --stacktrace
+    working-directory: ${{ env.PROJECT_DIR }}/android
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: leyh-qalha-v38-debug-apk
-          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+  - name: Upload APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: leyh-qalha-v38-debug-apk
+      path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
+      if-no-files-found: error
+      retention-days: 14
