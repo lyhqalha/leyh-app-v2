@@ -45,7 +45,6 @@ jobs:
           PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
           echo "Project directory: $PROJECT_DIR"
 
       - name: Set up Node.js
@@ -74,19 +73,16 @@ jobs:
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
 
-          echo "Android SDK: $SDK"
-          ls -la "$SDK"
-
           SDKMANAGER="$(find "$SDK/cmdline-tools" \
             -type f -name sdkmanager -print -quit 2>/dev/null || true)"
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "::error::sdkmanager was not found in the installed Android SDK."
+            echo "::error::sdkmanager was not found."
             exit 1
           fi
 
           echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
-          echo "Using sdkmanager: $SDKMANAGER"
+          echo "Android SDK found: $SDK"
 
       - name: Install Android SDK packages
         shell: bash
@@ -129,17 +125,54 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -f package-lock.json ]; then
-            npm ci --no-audit --no-fund
-          else
-            npm install --no-audit --no-fund
-          fi
+          npm install \
+            --legacy-peer-deps \
+            --no-audit \
+            --no-fund
+
+      - name: Verify Capacitor dependencies
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const p = JSON.parse(
+            fs.readFileSync('package.json', 'utf8')
+          );
+
+          const deps = {
+            ...p.dependencies,
+            ...p.devDependencies
+          };
+
+          const required = [
+            '@capacitor/core',
+            '@capacitor/cli',
+            '@capacitor/android'
+          ];
+
+          const missing = required.filter(
+            name => !deps[name]
+          );
+
+          if (missing.length > 0) {
+            console.error(
+              'Missing dependencies: ' + missing.join(', ')
+            );
+            process.exit(1);
+          }
+
+          console.log('Capacitor dependencies verified.');
+          NODE
 
       - name: Build web application
         working-directory: ${{ env.PROJECT_DIR }}
         run: npm run build
 
-      - name: Add Android platform
+      - name: Add Android platform if needed
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
