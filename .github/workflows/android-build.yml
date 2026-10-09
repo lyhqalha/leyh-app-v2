@@ -18,14 +18,14 @@ steps:
 
       if [ ! -f "$ARCHIVE" ]; then
         echo "::error::Project ZIP not found: $ARCHIVE"
-        find . -maxdepth 2 -type f -name '*.zip'
+        find . -maxdepth 3 -type f -name '*.zip'
         exit 1
       fi
 
       mkdir -p /tmp/leyh-source
       unzip -q "$ARCHIVE" -d /tmp/leyh-source
 
-      PROJECT="$(find /tmp/leyh-source -name package.json -printf '%h\n' | head -n 1)"
+      PROJECT="$(find /tmp/leyh-source -type f -name package.json -printf '%h\n' | head -n 1)"
 
       if [ -z "$PROJECT" ]; then
         echo "::error::package.json not found in the ZIP."
@@ -33,6 +33,7 @@ steps:
       fi
 
       echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+      echo "Project directory: $PROJECT"
 
   - name: Set up Node.js
     uses: actions/setup-node@v4
@@ -47,8 +48,6 @@ steps:
 
   - name: Set up Android SDK
     uses: android-actions/setup-android@v3
-    with:
-      cmdline-tools-version: 'latest'
 
   - name: Install dependencies
     run: npm install --no-audit --no-fund
@@ -58,23 +57,24 @@ steps:
     run: npm run build
     working-directory: ${{ env.PROJECT_DIR }}
 
-  - name: Check Android preparation files
+  - name: Check Android preparation script
     shell: bash
     run: |
-      set -e
-      if [ ! -f scripts/prepare_android.sh ]; then
+      set -euo pipefail
+      test -f scripts/prepare_android.sh || {
         echo "::error::scripts/prepare_android.sh is missing."
         exit 1
-      fi
+      }
     working-directory: ${{ env.PROJECT_DIR }}
 
   - name: Check Capacitor configuration
     shell: bash
     run: |
+      set -euo pipefail
       if [ ! -f capacitor.config.ts ] && \
          [ ! -f capacitor.config.json ] && \
          [ ! -f capacitor.config.js ]; then
-        echo "::error::Capacitor configuration is missing."
+        echo "::error::Capacitor configuration is missing from the project ZIP."
         exit 1
       fi
     working-directory: ${{ env.PROJECT_DIR }}
@@ -93,6 +93,7 @@ steps:
 
   - name: Build APK
     run: |
+      set -euo pipefail
       chmod +x gradlew
       ./gradlew assembleDebug --stacktrace
     working-directory: ${{ env.PROJECT_DIR }}/android
