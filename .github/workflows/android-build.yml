@@ -44,7 +44,6 @@ jobs:
 
           PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
 
-          # Create a Capacitor config in the actual extracted project.
           if [ ! -f "$PROJECT_DIR/capacitor.config.ts" ] && \
              [ ! -f "$PROJECT_DIR/capacitor.config.js" ] && \
              [ ! -f "$PROJECT_DIR/capacitor.config.json" ]; then
@@ -151,6 +150,20 @@ jobs:
             --no-audit \
             --no-fund
 
+      - name: Install Capacitor dependencies
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+
+          npm install \
+            @capacitor/core@^8.3.1 \
+            @capacitor/cli@^8.3.1 \
+            @capacitor/android@^8.3.1 \
+            --legacy-peer-deps \
+            --no-audit \
+            --no-fund
+
       - name: Verify Capacitor dependencies
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
@@ -190,6 +203,7 @@ jobs:
           NODE
 
       - name: Build web application
+        shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: npm run build
 
@@ -206,6 +220,7 @@ jobs:
           fi
 
       - name: Sync Capacitor
+        shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: npx cap sync android
 
