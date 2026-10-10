@@ -44,6 +44,25 @@ jobs:
 
           PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
 
+          # Create a Capacitor config in the actual extracted project.
+          if [ ! -f "$PROJECT_DIR/capacitor.config.ts" ] && \
+             [ ! -f "$PROJECT_DIR/capacitor.config.js" ] && \
+             [ ! -f "$PROJECT_DIR/capacitor.config.json" ]; then
+
+            cat > "$PROJECT_DIR/capacitor.config.ts" <<'CONFIG'
+          import type { CapacitorConfig } from '@capacitor/cli';
+
+          const config: CapacitorConfig = {
+            appId: 'com.leyhqalha.app',
+            appName: 'ليه قالها',
+            webDir: 'dist',
+            bundledWebRuntime: false
+          };
+
+          export default config;
+          CONFIG
+          fi
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Project directory: $PROJECT_DIR"
 
@@ -107,10 +126,12 @@ jobs:
             exit 1
           }
 
-          test -f capacitor.config.ts || {
-            echo "::error::capacitor.config.ts is missing."
+          if [ ! -f capacitor.config.ts ] && \
+             [ ! -f capacitor.config.js ] && \
+             [ ! -f capacitor.config.json ]; then
+            echo "::error::Capacitor configuration is missing."
             exit 1
-          }
+          fi
 
           test -f scripts/prepare_android.sh || {
             echo "::error::scripts/prepare_android.sh is missing."
@@ -209,6 +230,7 @@ jobs:
           chmod +x gradlew
 
       - name: Build debug APK
+        shell: bash
         working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
           set -euo pipefail
